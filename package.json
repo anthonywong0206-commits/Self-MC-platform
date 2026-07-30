@@ -1,0 +1,15 @@
+{
+  "name": "mc-self-study-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "可建立題庫、進行計時測驗及檢視答案的自我溫習 MC 平台",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/dev.mjs dist 4173",
+    "check": "node --check app.js && node scripts/build.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
