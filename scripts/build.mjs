@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const root = process.cwd();
 const out = path.join(root, 'dist');
-const files = ['index.html', 'styles.css', 'app.js', 'favicon.svg', 'README.md'];
+const files = ['index.html', 'styles.css', 'app.js', 'supabase-config.js', 'favicon.svg', 'README.md'];
 
 await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });

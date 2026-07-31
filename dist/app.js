@@ -5,6 +5,12 @@
     banks: 'mc-study-banks-v1',
     settings: 'mc-study-settings-v1'
   };
+  const supabaseConfig = window.MC_SUPABASE_CONFIG;
+  const supabase = supabaseConfig && window.supabase
+    ? window.supabase.createClient(supabaseConfig.url, supabaseConfig.publishableKey)
+    : null;
+  let currentUser = null;
+  let syncTimer = null;
   const LETTERS = ['A', 'B', 'C', 'D'];
   const uid = (prefix = 'id') => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const today = () => new Date().toISOString().slice(0, 10);
@@ -147,8 +153,57 @@
 
   const app = document.getElementById('app');
 
-  function saveBanks() { localStorage.setItem(STORAGE_KEYS.banks, JSON.stringify(banks)); }
-  function saveSettings() { localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings)); }
+  function scheduleCloudSync() {
+    if (!supabase || !currentUser) return;
+    window.clearTimeout(syncTimer);
+    syncTimer = window.setTimeout(syncCloudData, 450);
+  }
+  async function syncCloudData() {
+    if (!supabase || !currentUser) return;
+    const { error } = await supabase.from('mc_study_data').upsert({
+      user_id: currentUser.id, banks, settings, updated_at: new Date().toISOString()
+    });
+    if (error) toast('雲端同步失敗；資料仍保留在這部裝置。', 'error');
+  }
+  function saveBanks() { localStorage.setItem(STORAGE_KEYS.banks, JSON.stringify(banks)); scheduleCloudSync(); }
+  function saveSettings() { localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings)); scheduleCloudSync(); }
+
+  async function loadCloudData() {
+    const { data, error } = await supabase.from('mc_study_data').select('banks, settings').eq('user_id', currentUser.id).maybeSingle();
+    if (error) { toast('無法讀取雲端資料，暫時使用本機資料。', 'error'); return; }
+    if (data) {
+      banks = Array.isArray(data.banks) ? data.banks : [];
+      settings = { ...DEFAULT_SETTINGS, ...(data.settings || {}) };
+      state.selectedBankId = banks[0]?.id || null;
+      localStorage.setItem(STORAGE_KEYS.banks, JSON.stringify(banks));
+      localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
+    } else {
+      await syncCloudData();
+    }
+    applySettings();
+  }
+
+  function renderAuth() {
+    app.innerHTML = `<main class="page-wrap"><section class="empty-state main-panel" style="max-width:460px;margin:10vh auto"><div class="empty-icon">${icon('database')}</div><h1>登入以同步題庫</h1><p>登入後，題庫和設定會安全地儲存在雲端，並可在其他裝置使用。</p><form id="authForm" style="display:grid;gap:12px;text-align:left;margin-top:20px"><label class="form-field"><span>電郵地址</span><input name="email" type="email" autocomplete="email" required /></label><label class="form-field"><span>密碼</span><input name="password" type="password" autocomplete="current-password" minlength="6" required /></label><div class="header-actions"><button class="btn btn-primary" type="submit" data-auth-mode="signin">登入</button><button class="btn" type="submit" data-auth-mode="signup">建立帳戶</button></div></form><p class="panel-meta" style="margin-top:16px">首次登入會上傳這部裝置上的現有題庫。</p></section></main>`;
+    const form = document.getElementById('authForm');
+    form?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submitter = event.submitter;
+      const values = new FormData(form);
+      const email = String(values.get('email') || '').trim();
+      const password = String(values.get('password') || '');
+      const isSignup = submitter?.dataset.authMode === 'signup';
+      const response = isSignup
+        ? await supabase.auth.signUp({ email, password })
+        : await supabase.auth.signInWithPassword({ email, password });
+      if (response.error) { toast(response.error.message, 'error'); return; }
+      if (isSignup && !response.data.session) { toast('帳戶已建立，請到電郵信箱確認後再登入。'); return; }
+      currentUser = response.data.user || response.data.session?.user;
+      await loadCloudData();
+      render();
+      toast('已登入，雲端同步已啟用。');
+    });
+  }
   function selectedBank() { return banks.find((bank) => bank.id === state.selectedBankId) || banks[0] || null; }
   function applySettings() {
     document.documentElement.dataset.fontSize = settings.fontSize;
@@ -822,6 +877,17 @@ D. 提供細胞能量
     }
   }
 
-  applySettings();
-  render();
+  async function startApp() {
+    if (!supabase) {
+      app.innerHTML = '<main class="page-wrap"><section class="empty-state main-panel"><h1>雲端設定未完成</h1><p>找不到 Supabase 設定，請檢查 supabase-config.js。</p></section></main>';
+      return;
+    }
+    const { data } = await supabase.auth.getSession();
+    currentUser = data.session?.user || null;
+    if (!currentUser) { renderAuth(); return; }
+    await loadCloudData();
+    render();
+  }
+
+  startApp();
 })();
